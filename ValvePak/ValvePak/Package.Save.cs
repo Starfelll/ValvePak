@@ -101,23 +101,29 @@ namespace SteamDatabase.ValvePak
 		/// Opens and writes the given filename.
 		/// </summary>
 		/// <param name="filename">The file to open and write.</param>
-		public void Write(string filename)
+		public void Write(string filename, uint? version = null)
 		{
 			using var fs = new FileStream(filename, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 			fs.SetLength(0);
 
-			Write(fs);
+			Write(fs, version);
 		}
 
 		/// <summary>
 		/// Writes to the given <see cref="Stream"/>.
 		/// </summary>
 		/// <param name="stream">The input <see cref="Stream"/> to write to.</param>
-		public void Write(Stream stream)
+		public void Write(Stream stream, uint? version = null)
 		{
 			if (IsDirVPK)
 			{
 				throw new InvalidOperationException("This package was opened from a _dir.vpk, writing back is currently unsupported.");
+			}
+
+			version ??= Version;
+			if (version != 1 && version != 2)
+			{
+				throw new InvalidOperationException($"Vpk version {version} unsupported.");
 			}
 
 			ArgumentNullException.ThrowIfNull(stream);
@@ -164,12 +170,15 @@ namespace SteamDatabase.ValvePak
 
 			// Header
 			writer.Write(MAGIC);
-			writer.Write(2); // Version
+			writer.Write((uint)version); // Version
 			writer.Write(0); // TreeSize, to be updated later
-			writer.Write(0); // FileDataSectionSize, to be updated later
-			writer.Write(0); // ArchiveMD5SectionSize
-			writer.Write(48); // OtherMD5SectionSize
-			writer.Write(0); // SignatureSectionSize
+			if (version == 2)
+			{
+				writer.Write(0); // FileDataSectionSize, to be updated later
+				writer.Write(0); // ArchiveMD5SectionSize
+				writer.Write(48); // OtherMD5SectionSize
+				writer.Write(0); // SignatureSectionSize
+			}
 
 			var headerSize = (int)(stream.Position - streamOffset);
 			uint fileOffset = 0;
@@ -234,8 +243,11 @@ namespace SteamDatabase.ValvePak
 			// TODO: It is possible to precalculate these sizes to remove seeking
 			stream.Seek(streamOffset + (2 * sizeof(int)), SeekOrigin.Begin);
 			writer.Write((int)fileTreeSize);
-			writer.Write((int)fileDataSize);
 
+
+			if (version != 2)
+				return;
+			writer.Write((int)fileDataSize);
 			// Calculate file hashes
 			stream.Seek(streamOffset, SeekOrigin.Begin);
 
